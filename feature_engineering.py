@@ -52,7 +52,6 @@ def target_vol(ret_df, ann_vol=0.15):
     return df
 
 # data normalization of a time series using various methods
-@timethis
 def normalize(features, window_type='fixed', lookback=10, method='z-score'):
 
     """

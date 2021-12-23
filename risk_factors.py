@@ -4,7 +4,6 @@ import numpy as np
 from scipy.spatial import distance
 
 # high-low spread estimator (hlse)
-@timethis
 def hlse(ohlc_df, frequency='daily'):
     """
     Computes the high-low spread estimator, an estimate of bid-offer spreads, a measure of liquidity risk.
@@ -56,7 +55,6 @@ def hlse(ohlc_df, frequency='daily'):
     return S
 
 # turbulence index
-@timethis
 def turbulence(ret_df, window_type='rolling', lookback=36, p_vals=False):
     """
     Computes the Mahalanobis distance from a basket of assset returns, aka the turbulence index.

@@ -8,7 +8,6 @@ from sklearn.metrics import r2_score
 import statsmodels.api as sm
 
 # principal component analysis
-@timethis
 def pca(features_df, method='ppca', pc_name=None, n_components=1, min_var_explained=0.9):
 
     """
