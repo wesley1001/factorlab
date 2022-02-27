@@ -33,3 +33,25 @@ def add_lags(features_df, n_lags=24):
     print('{} lags were added to the features DataFrame for the distributed lag model regression\n'.format(n_lags))
 
     return features_df
+
+# compute log returns
+def returns(series):
+    """
+    Compute log returns of a price series
+
+    Parameters
+    ----------
+    series: price series or df
+        price for specific ticker and date
+
+    Returns
+    -------
+    log returns: return series or df
+        log difference of price series
+    """
+    ret = np.log(series) - np.log(series).shift(1)
+
+    return ret.dropna(how='all', axis=1)
+
+
+

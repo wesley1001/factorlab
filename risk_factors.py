@@ -125,3 +125,40 @@ def turbulence(ret_df, window_type='rolling', lookback=36, p_vals=False):
         df['turb_pval'] = 1 - stats.chi2.cdf(df.turb, ret_df.shape[1] - 1)
 
     return df
+
+# market divergence index (MDI)
+def mdi(series, log=False, lookback=30):
+    """
+    Compute the signal to noise ratio of a price series and the market divergence index
+    of a basket of price series.
+
+    Parameters
+    ----------
+    series: Series or Dataframe
+        Series or DataFrame with DatetimeIndex and price series.
+    log: bool, default False
+        Computes log of price series.
+    lookback: int
+        Number of observations to include in the window for signal to noise ratio.
+
+    Returns
+    -------
+    snr: series
+        signal to noise ratio of price series or market divergence index of basket of price series over n-day lookback window.
+    """
+
+    # log parameter
+    if log is True:
+        series = np.log(series)
+
+    # compute the singal to noise ratio
+    snr = (abs(series - series.shift(lookback))) / abs(series.diff()).rolling(lookback).sum()
+
+    # mean of cross-section
+    if type(series) is not pd.core.series.Series:
+        snr = snr.mean(axis=1)
+
+    return snr
+
+# ADX
+

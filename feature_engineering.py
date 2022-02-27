@@ -135,3 +135,6 @@ def normalize(features, window_type='fixed', lookback=10, method='z-score'):
     norm_features = norm_features.dropna(how='all')
 
     return norm_features
+
+# create target variable
+
