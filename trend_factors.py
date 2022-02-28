@@ -259,7 +259,7 @@ def intensity(ohlc_df, lookback=14, central_tendency='mean'):
     ohlc_df: DataFrame
         DataFrame with DatetimeIndex and OHLC prices.
     lookback: int
-        Number of observations to include in the rolling window mean.
+        Number of observations to include in the rolling window.
     central_tendency: str, {'mean', 'median'}, default 'mean'
         Measure of central tendency to use for smoothing over rolling window.
 
