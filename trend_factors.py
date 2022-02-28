@@ -282,5 +282,5 @@ def intensity(ohlc_df, lookback=14, central_tendency='mean'):
         intensity_smooth = intensity.rolling(lookback).median()
     else:
         intensity_smooth = intensity.rolling(lookback).mean()
-s
+
     return intensity_smooth
