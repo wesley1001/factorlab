@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 from scipy import stats
+from sklearn.preprocessing import KBinsDiscretizer
 
 # compute price log returns
 def returns(series, lags=1):
@@ -51,16 +52,16 @@ def target_vol(ret_df, ann_vol=0.15):
 
     return df
 
-# data normalization of a time series using various methods
+# normalize features
 def normalize(features, window_type='fixed', lookback=10, method='z-score'):
 
     """
-    Normalizes features using the method selected.
+    Normalizes features.
 
     Parameters
     ----------
     features: Series or DataFrame
-        DatetimeIndex and features to normalize.
+        Series or DataFrame with DatetimeIndex and features to normalize.
     window_type: str, {'fixed', 'expanding', 'rolling}, default 'fixed'
         Provide a window type. If None, all observations are used in the calculation.
     lookback: int, default 10
@@ -136,5 +137,58 @@ def normalize(features, window_type='fixed', lookback=10, method='z-score'):
 
     return norm_features
 
-# create target variable
+# discretization
+def discretize(features, discretization='quantile', bins=5, signal=False, tails=None):
+    """
+    Discretizes normalized factors or targets.
+
+    Parameters
+    ----------
+    features: Series or Dataframe
+        Series or DataFrame with DatetimeIndex and features. Features are typically normalized.
+    discretization: str, {'quantile', 'uniform', 'kmeans'}, default 'quantile'
+        quantile: all bins have the same number of values.
+        uniform: all bins have identical widths.
+        kmeans: values in each bin have the same nearest center of a 1D k-means cluster.
+    bins: int, default 5
+        Number of bins.
+    labels: bool, default False
+        Converts discretized values to signal between [-1,1], otherwise defautls to range(0,bins)
+    tails: str, {'two', 'left', 'right'}, default None, optional
+        Keeps tail bins and ignores middle bins. 'two' for both tails, 'left' for left tail, 'right' for right tail.
+
+    Returns
+    -------
+    disc_features: DataFrame
+        Series or DataFrame with DatetimeIndex and discretized features.
+    """
+
+    # must have more than 1 bin
+    if bins <= 1:
+        print('Number of bins must be larger than 1. Please increase number of bins. \n')
+        return
+
+    # convert to df if series and drop NaNs
+    if isinstance(features, pd.Series):
+        features = features.to_frame().dropna()
+    else:
+        features.dropna(inplace=True)
+
+    # discretize features
+    discretize = KBinsDiscretizer(n_bins=bins, encode='ordinal', strategy=discretization)
+    disc_df = pd.DataFrame(discretize.fit_transform(features), index=features.index, columns=features.columns)
+
+    # convert labels to signal
+    if signal:
+        disc_df = ((disc_df + 1) - (disc_df + 1).median()) / disc_df.median()
+
+    # convert discretized values to tails only
+    if tails == 'two':
+        disc_df = disc_df[(disc_df == disc_df.min()) | (disc_df == disc_df.max())].fillna(0)
+    elif tails == 'left':
+        disc_df = disc_df[disc_df == disc_df.min()].fillna(0)
+    elif tails == 'right':
+        disc_df = disc_df[disc_df == disc_df.max()].fillna(0)
+
+    return disc_df.round(2)
 
