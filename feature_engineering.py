@@ -137,7 +137,7 @@ def normalize(features, window_type='fixed', lookback=10, method='z-score'):
 
     return norm_features
 
-# discretization
+# discretize features
 def discretize(features, discretization='quantile', bins=5, signal=False, tails=None):
     """
     Discretizes normalized factors or targets.
