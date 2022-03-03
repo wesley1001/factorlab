@@ -166,7 +166,7 @@ def discretize(features, discretization='quantile', bins=5, signal=False, tails=
     """
 
     # return features if bin is None
-    if bin is None:
+    if bins is None:
         return features
 
     # less than or equal 1 bin
@@ -181,7 +181,7 @@ def discretize(features, discretization='quantile', bins=5, signal=False, tails=
             features = features.to_frame().dropna()
         else:
             features.dropna(inplace=True)
-    
+
         # discretize features
         discretize = KBinsDiscretizer(n_bins=bins, encode='ordinal', strategy=discretization)
         disc_df = pd.DataFrame(discretize.fit_transform(features), index=features.index, columns=features.columns)
