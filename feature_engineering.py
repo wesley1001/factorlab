@@ -140,7 +140,9 @@ def normalize(features, window_type='fixed', lookback=10, method='z-score'):
 # discretize features
 def discretize(features, discretization='quantile', bins=5, signal=False, tails=None):
     """
-    Discretizes normalized factors or targets.
+    Discretizes normalized factors or targets. Discretization is the process of transforming a continuous variable
+    into a discrete one by creating a set of bins (or equivalently contiguous intervals/cuttoffs) that spans the range
+    of the variable’s values.
 
     Parameters
     ----------
@@ -163,32 +165,38 @@ def discretize(features, discretization='quantile', bins=5, signal=False, tails=
         Series or DataFrame with DatetimeIndex and discretized features.
     """
 
-    # must have more than 1 bin
-    if bins <= 1:
+    # return features if bin is None
+    if bin is None:
+        return features
+
+    # less than or equal 1 bin
+    elif bins <= 1:
         print('Number of bins must be larger than 1. Please increase number of bins. \n')
         return
 
-    # convert to df if series and drop NaNs
-    if isinstance(features, pd.Series):
-        features = features.to_frame().dropna()
+    # more than 1 bin
     else:
-        features.dropna(inplace=True)
+        # convert to df if series and drop NaNs
+        if isinstance(features, pd.Series):
+            features = features.to_frame().dropna()
+        else:
+            features.dropna(inplace=True)
+    
+        # discretize features
+        discretize = KBinsDiscretizer(n_bins=bins, encode='ordinal', strategy=discretization)
+        disc_df = pd.DataFrame(discretize.fit_transform(features), index=features.index, columns=features.columns)
 
-    # discretize features
-    discretize = KBinsDiscretizer(n_bins=bins, encode='ordinal', strategy=discretization)
-    disc_df = pd.DataFrame(discretize.fit_transform(features), index=features.index, columns=features.columns)
+        # convert labels to signal
+        if signal:
+            disc_df = ((disc_df + 1) - (disc_df + 1).median()) / disc_df.median()
 
-    # convert labels to signal
-    if signal:
-        disc_df = ((disc_df + 1) - (disc_df + 1).median()) / disc_df.median()
-
-    # convert discretized values to tails only
-    if tails == 'two':
-        disc_df = disc_df[(disc_df == disc_df.min()) | (disc_df == disc_df.max())].fillna(0)
-    elif tails == 'left':
-        disc_df = disc_df[disc_df == disc_df.min()].fillna(0)
-    elif tails == 'right':
-        disc_df = disc_df[disc_df == disc_df.max()].fillna(0)
+        # convert discretized values to tails only
+        if tails == 'two':
+            disc_df = disc_df[(disc_df == disc_df.min()) | (disc_df == disc_df.max())].fillna(0)
+        elif tails == 'left':
+            disc_df = disc_df[disc_df == disc_df.min()].fillna(0)
+        elif tails == 'right':
+            disc_df = disc_df[disc_df == disc_df.max()].fillna(0)
 
     return disc_df.round(2)
 
