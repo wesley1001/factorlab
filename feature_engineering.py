@@ -200,3 +200,85 @@ def discretize(features, discretization='quantile', bins=5, signal=False, tails=
 
     return disc_df.round(2)
 
+# convert to signal
+def convert_to_signal(features, window_type='fixed', lookback=10, method='z-score'):
+
+    """
+    Normalizes features.
+
+    Parameters
+    ----------
+    features: Series or DataFrame
+        Series or DataFrame with DatetimeIndex and features to normalize.
+    window_type: str, {'fixed', 'expanding', 'rolling}, default 'fixed'
+        Provide a window type. If None, all observations are used in the calculation.
+    lookback: int, default 10
+        Size of the moving window. This is the minimum number of observations used for the rolling or expanding statistic.
+    method: str, {'min-max', 'percentile'}, default 'percentile'
+            min-max: brings all values into the range [0,1] by subtracting the min and dividing by the range (max - min), then rescales to between -1 and 1.
+            percentile: converts values to their percentile rank relative to the observations in the defined window type, then rescales to between -1 and 1.
+
+    Returns
+    -------
+    norm_features: Series or DataFrame
+        DatetimeIndex and normalized features
+    """
+
+    # rolling window type
+    if window_type == 'rolling':
+        # z-score method
+        if method == 'z-score':
+            norm_features = (features - features.rolling(lookback).mean()) / features.rolling(lookback).std()
+        # quantile method
+        elif method == 'quantile':
+            norm_features = (features - features.rolling(lookback).median()) / (features.rolling(lookback).quantile(0.75) - features.rolling(looback).quantile(0.25))
+        # min-max method
+        elif method == 'min-max':
+            norm_features = (features - features.rolling(lookback).min()) / (features.rolling(lookback).max() - features.rolling(lookback).min())
+        # percentile method
+        elif method == 'percentile':
+            norm_features = features.rolling(lookback).apply(lambda x: stats.percentileofscore(x, x[-1])/100, raw=True)
+        # None
+        else:
+            norm_features = features
+
+    # expanding window type
+    elif window_type == 'expanding':
+        # z-score method
+        if method == 'z-score':
+            norm_features = (features - features.expanding(lookback).mean()) / features.expanding(lookback).std()
+        # quantile method
+        elif method == 'quantile':
+            norm_features = (features - features.expanding(lookback).median()) / (features.expanding(lookback).quantile(0.75) - features.expanding(looback).quantile(0.25))
+        # min-max method
+        elif method == 'min-max':
+            norm_features = (features - features.expanding(lookback).min()) / (features.expanding(lookback).max() - features.expanding(lookback).min())
+        # percentile method
+        elif method == 'percentile':
+            norm_features = features.expanding(lookback).apply(lambda x: stats.percentileofscore(x, x[-1])/100, raw=True)
+        # None
+        else:
+            norm_features = features
+
+    # fixed window type
+    else:
+        # z-score method
+        if method == 'z-score':
+            norm_features = (features - features.mean()) / features.std()
+        # quantile method
+        elif method == 'quantile':
+            norm_features = (features - features.median()) / (features.quantile(0.75) - features.quantile(0.25))
+        # min-max method
+        elif method == 'min-max':
+            norm_features = (features - features.min()) / (features.max() - features.min())
+        # percentile method
+        elif method == 'percentile':
+            norm_features = features.rank(pct=True)
+        # None
+        else:
+            norm_features = features
+
+    # drop NaNs
+    norm_features = norm_features.dropna(how='all')
+
+    return norm_features

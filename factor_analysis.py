@@ -6,6 +6,7 @@ from ppca import PPCA
 from sklearn.linear_model import LassoLarsIC, Lasso
 from sklearn.metrics import r2_score
 import statsmodels.api as sm
+from scipy.stats import ttest_1samp, chi2_contingency, spearmanr, kendalltau, contingency
 
 # principal component analysis
 def pca(features_df, method='ppca', pc_name=None, n_components=1, min_var_explained=0.9):
@@ -366,5 +367,264 @@ def project_target(target, features_df):
 
     return fitted_target
 
-# evaluation metrics
+# Information coefficient (IC)
+def IC(factors, target_ret, lookahead=14, pc1=True, factor_bins=5, target_bins=5, ic_rolling_window=365):
+    """
+    Calculates correlation for returns, or degree of association for labels (bins), between the alpha factors (features)
+    and forward returns (target). Correlation measures in what way two variables are related, whereas, association measures
+    how related the variables are.
+    orrelation measures such as the spearman rank, kendall and pearson compute.
 
+    Measures the degree to which two nominal or ordinal variables are related, or the level of their association.
+    Both factors and target should be discretized before computing a measure of the degree to which category membership
+
+    Parameters
+    ----------
+    factors: Series or DataFrame
+        Series or DataFrame with DatetimeIndex and alpha factors.
+    target: Series
+        Series with DatetimeIndex and target variable.
+    lookahead: int, default 1
+        Number of periods to shift forward returns (target).
+    factor_bins: int, optional, default None
+        Number of bins into which to discretize/label the normalized factors. None leaves factor inputs unchanged.
+    target_bins: int, optional, default None
+        Number of bins into which to discretize/label the normalized target. None leaves target inputs unchanged.
+
+    Returns
+    -------
+    metrics: DataFrame
+        DataFrame with computed stasticial association/correlation metrics.
+    """
+
+    # if bins is None or 1
+    if factor_bins < 2 or target_bins < 2:
+        print("Number of bins must be larger than 1. Please increase number of bins.\n")
+        return
+
+    else:
+
+        # if factors or target are Series, convert to DataFrame
+        if isinstance(factors, pd.Series):
+            factors = factors.to_frame()
+        if isinstance(target_ret, pd.Series):
+            target_ret = target_ret.to_frame()
+        # get principal components of factors
+        if pc1:
+            factors = pca(factors, method='pca', pc_name='trend', min_var_explained=0.5)
+            # constrain pc1 to be positively correlated with factors
+            col = factors.loc[:, factors.columns.str.contains('pc1')].columns[0]
+            if factors.corr()[col].mean() < 0:
+                factors[col] = factors[col] * -1
+
+        # discretize factors and target
+        # factor bins
+        factor_quantiles_df = discretize(factors, bins=factor_bins)
+        # target bins
+        target_quantiles_df = discretize(target_ret, bins=target_bins)
+
+        # merge factors and target, shift target by lookahead periods
+        df = factors.merge(target_ret.shift(lookahead * -1), how='outer', left_index=True, right_index=True).dropna()
+        quantiles_df = factor_quantiles_df.merge(target_quantiles_df.shift(lookahead * -1), how='outer',
+                                                 left_index=True, right_index=True).dropna()
+
+        # create empy dfs for correlation measures
+        metrics, ic_df = pd.DataFrame(index=factors.columns), pd.DataFrame(index=df.index, columns=factors.columns)
+
+        # calculate correlation and assocation measures
+        # loop through factors
+        for col in factors.columns:
+            # contingency table
+            cont_table = pd.crosstab(quantiles_df[col], quantiles_df.iloc[:, -1])
+            # add metrics
+            metrics.loc[col, 'IC/spearman_rank'] = spearmanr(quantiles_df[col], df.iloc[:, -1])[0]
+            metrics.loc[col, 'p-val'] = spearmanr(quantiles_df[col], df.iloc[:, -1])[1]
+            metrics.loc[col, 'kendall_tau'] = kendalltau(quantiles_df[col], df.iloc[:, -1])[0]
+            metrics.loc[col, 'cramer_v'] = contingency.association(cont_table, method='cramer')
+            metrics.loc[col, 'tschuprow_t'] = contingency.association(cont_table, method='tschuprow')
+            metrics.loc[col, 'pearson_cc'] = contingency.association(cont_table, method='pearson')
+            metrics.loc[col, 'chi2'] = chi2_contingency(cont_table)[0]
+            metrics.loc[col, 'autocorrelation'] = \
+            spearmanr(quantiles_df[col].iloc[1:].dropna(), quantiles_df[col].shift(1).dropna())[0]
+
+            # window size
+            window_size = ic_rolling_window
+
+            # while loop for rolling window spearman rank corr
+            while window_size <= df.shape[0]:
+                # compute spearman rank correlation
+                ic_df[col].iloc[window_size - 1] = \
+                spearmanr(quantiles_df[col].iloc[window_size - ic_rolling_window:window_size],
+                          df.iloc[window_size - ic_rolling_window:window_size, -1])[0]
+                window_size += 1
+
+    # plot ic df
+    plt.style.use('ggplot')
+    ic_df.plot(legend=True, figsize=(15, 7), linewidth=2, rot=0, title='Information Coefficient',
+               ylabel='{}-day rolling window'.format(ic_rolling_window));
+
+    # create dict to store dfs
+    dict_dfs = {'metrics': metrics.sort_values(by='IC/spearman_rank', ascending=False).round(decimals=4),
+                'ic_rolling': ic_df.dropna()}
+
+    return dict_dfs
+
+# factor returns
+def factor_returns(factors, returns, lookahead=14, pc1=True, bins=None, tails=None, tcost=None):
+    """
+    Screens features for predictive relationship with the target and provides summary performance statistics
+
+    Parameters
+    ----------
+    factors: Series or Dataframe
+        Series or DataFrame with DatetimeIndex and factors.
+    returns: Series
+        Target returns series.
+    lookahead: int, default 1
+        Number of periods to shift forward returns.
+    pc1: bool, default False
+        Compute principal components of factors and add them to factors.
+    bins: int, default None
+        Number of desired bins for discretization.
+    tails: str, default None
+        Keeps only tail bins and ignores middle bins, 'two' for both tails, 'left' for left, 'right' for right
+    tcost: float, default None
+        Transaction fee subtracted from returns to get net returns.
+        Depends on exchange, e.g. Binance maker/taker fee is 0.001.
+
+    Returns
+    -------
+    dict_dfs: dictionary with DataFrames
+        'net_ret' DataFrame with returns (net of t-cost) of target returns scaled on factor signals;
+        'perf' DataFrame with performance metrics of net returns;
+    """
+
+    # convert to df if series
+    if isinstance(factors, pd.Series):
+        factors = factors.to_frame()
+
+    # get principal components of factors
+    if pc1:
+        factors = pca(factors, method='pca', pc_name='trend', min_var_explained=0.5)
+        # constrain pc1 to be positively correlated with factors
+        col = factors.loc[:, factors.columns.str.contains('pc1')].columns[0]
+        if factors.corr()[col].mean() < 0:
+            factors[col] = factors[col] * -1
+
+    # convert factors to signal
+    signal_df = (normalize(factors, method='percentile') * 2) - 1
+    # discretize signal into signal quantiles between -1 and 1
+    signal_quantiles_df = discretize(signal_df, bins=bins, signal=True, tails=tails)
+
+    # compute factor returns and tcosts
+    if tcost is None:
+        tcost = 0
+    if bins is None:
+        ret_df = signal_df.shift(lookahead).multiply(returns, axis=0)
+        tcost_df = abs(signal_df.diff()).shift(lookahead) * tcost * (1 / lookahead)
+    else:
+        ret_df = signal_quantiles_df.shift(lookahead).multiply(returns, axis=0)
+        tcost_df = abs(signal_quantiles_df.diff()).shift(lookahead) * tcost * (1 / lookahead)
+
+    # compute net ret
+    if lookahead > 1:
+        net_ret_df = (ret_df / lookahead) - tcost_df
+    else:
+        # compute net returns
+        net_ret_df = ret_df - tcost_df
+    # create performance metrics df for net returns
+    perf_df = factor_performance(net_ret_df, returns)
+    perf_df.index.name = 'alpha_factors'
+
+    # create quantiles for mean return by quantile plot
+    if bins is None:
+        bins = 5
+    factor_quantiles_df = (discretize(factors, bins=bins, tails=tails) + 1).astype(int)
+
+    # compute IR for each bin
+    bins_ret = pd.DataFrame(index=range(1, bins + 1))
+    for col in net_ret_df.columns:
+        bins_ret[col] = (net_ret_df[col].groupby(factor_quantiles_df[col].shift(lookahead)).mean())
+    # name index quantile
+    bins_ret.index.name = 'quantile'
+    # add top vs bottom quantile bin in index
+    bins_ret.loc['top vs. bottom', :] = bins_ret.iloc[-1] - bins_ret.iloc[0]
+
+    # show cum ret and bar chart subplots
+    plt.style.use('ggplot')
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 7))
+    net_ret_df.cumsum().plot(legend=True, linewidth=2, rot=0, ax=ax1, title='Cumulative returns')
+    ax1.set_ylabel('Cumulative returns (net)');
+
+    # plot the mean returns by quantile of the best performing factor
+    col = perf_df.index[0]
+    bins_ret[col].plot(kind='bar', color='#C59B8E', legend=False, rot=90, ax=ax2,
+                       title='Mean Returns (net) by Factor Quantile: {}'.format(col));
+    ax2.set_ylabel('Mean returns (net)');
+
+    # create dict to store dfs
+    dict_dfs = {'net_ret': net_ret_df, 'perf': perf_df}
+
+    return dict_dfs
+
+# factor performance
+def factor_performance(factor_ret, returns, freq='daily'):
+    """
+    Computes key performance metrics for factor returns.
+
+    Parameters
+    ----------
+    returns: Series or DataFrame
+        Series or DataFrame with DatetimeIndex and factor returns series.
+    freq: str, {'min', 'hourly', 'daily_business', 'daily', 'weekly', 'monthly'}, default 'daily'
+        Frequency of returns.
+
+    Returns
+    -------
+    metrics: DataFrame
+        DataFrame with computed performance metrics.
+    """
+
+    # annualizaton adjustment factor
+    if freq == 'min':
+        ann_adj = 365 * 24 * 60
+    elif freq == 'hourly':
+        ann_adj = 365 * 24
+    elif freq == 'daily_business':
+        ann_adj = 252
+    elif freq == 'weekly':
+        ann_adj = 52
+    elif freq == 'monthly':
+        ann_adj = 12
+    else:
+        ann_adj = 365
+
+    # convert to df if series
+    if isinstance(factor_ret, pd.Series):
+        returns = factor_ret.to_frame()
+
+    # create metrics df and add performance metrics
+    metrics = pd.DataFrame(index=factor_ret.columns)
+    metrics['Annual return'] = factor_ret.mean() * ann_adj
+    metrics['Annual volatility'] = factor_ret.std() * np.sqrt(ann_adj)
+    metrics['Sharpe ratio'] = (factor_ret.mean() / factor_ret.std()) * np.sqrt(ann_adj)
+    metrics['Sortino ratio'] = (factor_ret.mean() / factor_ret[factor_ret < 0].std()) * np.sqrt(ann_adj)
+    metrics['Skewness'] = factor_ret.skew()
+    metrics['Kurtosis'] = factor_ret.kurt()
+    metrics['P-val'] = ttest_1samp(factor_ret.dropna(), popmean=0)[1] / 2
+
+    # loop through df
+    for col in factor_ret.columns:
+
+        y = factor_ret[col]
+        X = sm.add_constant(returns, prepend=True)
+        data = pd.concat([y, X], axis=1).dropna()
+        # Fit and summarize OLS model
+        res = sm.OLS(data.iloc[:,0], data.iloc[:,1:]).fit(missing='drop')
+        # add to metrics
+        metrics.loc[col,'Annual alpha'], metrics.loc[col, 'Beta'] = ((res.params[0]+1)**ann_adj-1), res.params[1]
+
+    # sort by sharpe ratio and round values to 2 decimals
+    metrics = metrics.sort_values(by='Sharpe ratio', ascending=False).astype(float).round(decimals=2)
+
+    return metrics
